@@ -1,0 +1,295 @@
+name: Deploy Traffic API to VPS
+
+on:
+  # push:
+  #   branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  PROJECT_DIR: .
+  TRAFFIC_API_DIR: .
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install system dependencies on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -x  # Enable debug mode
+            set -e  # Exit on error
+            
+            echo "Starting deployment process..."
+
+            cd ..
+            cd ..
+            cd ..
+            cd ..
+            cd ..
+            if [ -d "traffic_api" ]; then
+              cd traffic_api
+              docker compose down
+              echo "Docker compose down completed."
+              
+              cd ..
+              rm -rf traffic_api
+              echo "Removed existing traffic_api directory."
+            fi
+                      
+            # Clone main repository
+              git clone https://${{ secrets.DEV_GITHUB_PAT }}@github.com/abdullahalhoothy/traffic_api.git
+            cd traffic_api
+
+            set -e
+            echo "🛠️ Installing system dependencies..."
+
+            # Update package list
+            apt update -qq
+
+            # Install essential dependencies
+            apt install -y -qq \
+              curl \
+              wget \
+              git \
+              apt-transport-https \
+              ca-certificates \
+              gnupg \
+              lsb-release \
+              software-properties-common \
+              uidmap
+
+            # Verify installations
+            echo "✅ Dependencies installed:"
+            curl --version | head -1
+            wget --version | head -1
+            git --version
+            echo "System dependencies installation completed"
+
+      - name: Check and install Docker on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            echo "🔍 Checking Docker installation..."
+            
+            if ! command -v docker &> /dev/null; then
+              echo "🐳 Docker not found. Installing Docker..."
+              # curl -fsSL https://get.docker.com -o get-docker.sh
+              # sudo sh get-docker.sh
+              apt install -y -qq docker
+              usermod -aG docker $USER
+              # rm get-docker.sh
+              echo "✅ Docker installed successfully"
+            else
+              echo "✅ Docker is already installed"
+              docker --version
+            fi
+
+      - name: Check and install Docker Compose on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            echo "🔍 Checking Docker Compose installation..."
+            
+            if ! command -v docker-compose &> /dev/null; then
+              echo "🐳 Docker Compose not found. Installing Docker Compose..."
+
+              # Install Docker Compose v2 (recommended)
+              # DOCKER_COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+              # sudo curl -L "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+              # sudo chmod +x /usr/local/bin/docker-compose
+
+              # Create symlink for docker compose (v2)
+              # sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+
+              apt install -y -qq docker-compose
+
+              echo "✅ Docker Compose installed successfully"
+              docker-compose --version
+            else
+              echo "✅ Docker Compose is already installed"
+              # Try both commands for compatibility
+              docker-compose --version || docker compose version
+            fi
+
+      - name: Setup Traffic API project directory on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            mkdir -p ${{ env.TRAFFIC_API_DIR }}/{data,static,logs}
+            chown -R ${{ secrets.VPS_USERNAME }}:${{ secrets.VPS_USERNAME }} ${{ env.PROJECT_DIR }}
+            chmod -R 755 ${{ env.PROJECT_DIR }}
+
+      - name: Copy project files to VPS
+        uses: appleboy/scp-action@v0.1.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "."
+          target: ${{ env.PROJECT_DIR }}/
+          # strip_components: 1
+
+      - name: Create environment file on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd ${{ env.TRAFFIC_API_DIR }}
+            
+            # Create .env file with proper escaping
+            cat > .env << 'ENDFILE'
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}
+            RATE_LIMIT=${{ secrets.RATE_LIMIT || '10/minute' }}
+            SELENIUM_PROXY=${{ secrets.SELENIUM_PROXY || '' }}
+            ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS || '0.0.0.0,127.0.0.1,localhost' }}
+            ENDFILE
+            
+            echo "✅ Created/updated .env file"
+            # Show first few chars for verification (without exposing secrets)
+            echo "📄 .env file preview (first line):"
+            head -n 1 .env | sed 's/./*/g'
+
+      - name: Deploy application
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd ${{ env.TRAFFIC_API_DIR }}
+
+            echo "🔍 Checking available disk space..."
+            df -h .
+
+            echo "Ensure proper cleanup before deployment"
+            docker stop $(docker ps -q --filter "publish=8000") 2>/dev/null || true
+            sudo fuser -k 8000/tcp
+            
+            echo "🔄 Stopping existing containers..."
+            # Try both docker-compose and docker compose for compatibility
+            docker-compose down --remove-orphans 2>/dev/null || docker compose down --remove-orphans
+            
+            echo "🏗️ Pulling latest base images..."
+            docker-compose pull --quiet 2>/dev/null || docker compose pull --quiet
+            
+            echo "🚀 Building and starting services..."
+            # Force recreate containers to ensure updated images and configuration are applied
+            docker-compose up -d --build --force-recreate 2>/dev/null || docker compose up -d --build --force-recreate
+            
+            echo "⏳ Waiting for services to initialize..."
+            sleep 10
+            
+            # Wait for services to be ready with timeout
+            echo "🔍 Waiting for services to be healthy..."
+            for i in {1..6}; do
+              if docker-compose ps | grep -q "Up" || docker compose ps | grep -q "Up"; then
+                echo "✅ Services are starting up..."
+                break
+              fi
+              echo "⏳ Still waiting for services... ($i/6)"
+              sleep 10
+            done
+            
+            echo "📊 Final service status:"
+            docker-compose ps 2>/dev/null || docker compose ps
+
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd ${{ env.TRAFFIC_API_DIR }}
+            
+            # Use whichever compose command works
+            if command -v docker-compose &> /dev/null; then
+              COMPOSE_CMD="docker-compose"
+            else
+              COMPOSE_CMD="docker compose"
+            fi
+            
+            echo "Using compose command: $COMPOSE_CMD"
+            
+            # Check if API container is running
+            API_STATUS=$($COMPOSE_CMD ps api | grep -c "Up" || true)
+            if [ "$API_STATUS" -eq 1 ]; then
+              echo "✅ API container is running"
+            else
+              echo "❌ API container is not running"
+              $COMPOSE_CMD logs api
+              exit 1
+            fi
+            
+            # Check if Selenium Hub is running
+            HUB_STATUS=$($COMPOSE_CMD ps selenium-hub | grep -c "Up" || true)
+            if [ "$HUB_STATUS" -eq 1 ]; then
+              echo "✅ Selenium Hub is running"
+            else
+              echo "❌ Selenium Hub is not running"
+              $COMPOSE_CMD logs selenium-hub
+              exit 1
+            fi
+
+            # Test Selenium Grid Server
+            if curl -f -s http://${{ secrets.VPS_HOST }}:4444 > /dev/null; then
+              echo "✅ Selenium Grid is responding"
+            else
+              echo "⏳ Selenium Grid not responding"
+              sleep 10
+            fi
+
+            # Test API health endpoint with retries
+            echo "🧪 Testing API connectivity..."
+            for i in {1..5}; do
+              if curl -f -s http://${{ secrets.VPS_HOST }}:8000/health > /dev/null ||
+                 curl -f -s http://${{ secrets.VPS_HOST }}:8000/docs > /dev/null ||
+                 curl -f -s http://${{ secrets.VPS_HOST }}:8000/ > /dev/null; then
+                echo "✅ API is responding (attempt $i)"
+                break
+              else
+                echo "⏳ API not ready yet (attempt $i), waiting..."
+                sleep 10
+              fi
+            done
+
+      - name: Clean up old images
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            echo "🧹 Cleaning up unused Docker resources..."
+            docker image prune -f || true
+            docker system prune -f --volumes || true
+
+      - name: Send deployment notification
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "🎉 Deployment completed successfully!"
+            # Add success notification here (Slack, Discord, etc.)
+          else
+            echo "❌ Deployment failed!"
+            # Add failure notification here
+          fi
