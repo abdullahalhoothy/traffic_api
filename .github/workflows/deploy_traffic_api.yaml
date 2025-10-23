@@ -154,42 +154,49 @@ jobs:
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            cd ${{ env.TRAFFIC_API_DIR }}
+              cd ${{ env.TRAFFIC_API_DIR }}
 
-            echo "🔍 Checking available disk space..."
-            df -h .
+              echo "🔍 Checking available disk space..."
+              df -h .
 
-            echo "Ensure proper cleanup before deployment"
-            docker stop $(docker ps -q --filter "publish=8000") 2>/dev/null || true
-            sudo fuser -k 8000/tcp
-            
-            echo "🔄 Stopping existing containers..."
-            # Try both docker-compose and docker compose for compatibility
-            docker-compose down --remove-orphans 2>/dev/null || docker compose down --remove-orphans
-            
-            echo "🏗️ Pulling latest base images..."
-            docker-compose pull --quiet 2>/dev/null || docker compose pull --quiet
-            
-            echo "🚀 Building and starting services..."
-            # Force recreate containers to ensure updated images and configuration are applied
-            docker-compose up -d --build --force-recreate 2>/dev/null || docker compose up -d --build --force-recreate
-            
-            echo "⏳ Waiting for services to initialize..."
-            sleep 10
-            
-            # Wait for services to be ready with timeout
-            echo "🔍 Waiting for services to be healthy..."
-            for i in {1..6}; do
-              if docker-compose ps | grep -q "Up" || docker compose ps | grep -q "Up"; then
-                echo "✅ Services are starting up..."
-                break
+              echo "Ensure proper cleanup before deployment"
+              docker stop $(docker ps -q --filter "publish=8000") 2>/dev/null || true
+              sudo fuser -k 8000/tcp
+
+              # Ensure docker-compose config file exists
+              if [ ! -f "docker-compose.yml" ] && [ ! -f "docker-compose.yaml" ] && [ ! -f "compose.yml" ] && [ ! -f "compose.yaml" ]; then
+                echo "❌ No docker-compose configuration file found in $(pwd)!"
+                ls -l
+                exit 1
               fi
-              echo "⏳ Still waiting for services... ($i/6)"
+
+              echo "🔄 Stopping existing containers..."
+              # Try both docker-compose and docker compose for compatibility
+              docker-compose down --remove-orphans 2>/dev/null || docker compose down --remove-orphans
+
+              echo "🏗️ Pulling latest base images..."
+              docker-compose pull --quiet 2>/dev/null || docker compose pull --quiet
+
+              echo "🚀 Building and starting services..."
+              # Force recreate containers to ensure updated images and configuration are applied
+              docker-compose up -d --build --force-recreate 2>/dev/null || docker compose up -d --build --force-recreate
+
+              echo "⏳ Waiting for services to initialize..."
               sleep 10
-            done
-            
-            echo "📊 Final service status:"
-            docker-compose ps 2>/dev/null || docker compose ps
+
+              # Wait for services to be ready with timeout
+              echo "🔍 Waiting for services to be healthy..."
+              for i in {1..6}; do
+                if docker-compose ps | grep -q "Up" || docker compose ps | grep -q "Up"; then
+                  echo "✅ Services are starting up..."
+                  break
+                fi
+                echo "⏳ Still waiting for services... ($i/6)"
+                sleep 10
+              done
+
+              echo "📊 Final service status:"
+              docker-compose ps 2>/dev/null || docker compose ps
 
       - name: Verify deployment
         uses: appleboy/ssh-action@v1.0.3
