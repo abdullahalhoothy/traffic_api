@@ -41,7 +41,9 @@ jobs:
               gnupg \
               lsb-release \
               software-properties-common \
-              uidmap
+              uidmap \
+              python3-venv \
+              python3.12-venv
 
             # Verify installations
             echo "✅ Dependencies installed:"
