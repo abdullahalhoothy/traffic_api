@@ -45,6 +45,9 @@ jobs:
               git clone https://${{ secrets.DEV_GITHUB_PAT }}@github.com/abdullahalhoothy/traffic_api.git
             cd traffic_api
 
+              echo "📁 Listing files in traffic_api directory after clone:"
+              ls -l
+
             set -e
             echo "🛠️ Installing system dependencies..."
 
