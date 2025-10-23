@@ -1,19 +1,21 @@
 name: Deploy Traffic API to VPS
 
 on:
-  push:
-    branches: [ main ]
+  # push:
+  #   branches: [ main, master ]
   workflow_dispatch:
 
 env:
-  PROJECT_DIR: .
-  TRAFFIC_API_DIR: ./traffic_api
+  TRAFFIC_API_DIR: /traffic_api
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Install system dependencies on VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -23,32 +25,7 @@ jobs:
           script: |
             set -x  # Enable debug mode
             set -e  # Exit on error
-            
-            echo "Starting deployment process..."
 
-            cd ..
-            cd ..
-            cd ..
-            cd ..
-            cd ..
-            if [ -d "traffic_api" ]; then
-              cd traffic_api
-              docker compose down
-              echo "Docker compose down completed."
-              
-              cd ..
-              rm -rf traffic_api
-              echo "Removed existing traffic_api directory."
-            fi
-                      
-            # Clone main repository
-              git clone https://${{ secrets.DEV_GITHUB_PAT }}@github.com/abdullahalhoothy/traffic_api.git
-            cd traffic_api
-
-            echo "📁 Listing files in traffic_api directory after clone:"
-            ls -l
-
-            set -e
             echo "🛠️ Installing system dependencies..."
 
             # Update package list
@@ -80,16 +57,15 @@ jobs:
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
+            set -x
             set -e
+
             echo "🔍 Checking Docker installation..."
             
             if ! command -v docker &> /dev/null; then
               echo "🐳 Docker not found. Installing Docker..."
-              # curl -fsSL https://get.docker.com -o get-docker.sh
-              # sudo sh get-docker.sh
               apt install -y -qq docker
               usermod -aG docker $USER
-              # rm get-docker.sh
               echo "✅ Docker installed successfully"
             else
               echo "✅ Docker is already installed"
@@ -104,19 +80,12 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             set -e
+            set -x
+
             echo "🔍 Checking Docker Compose installation..."
             
             if ! command -v docker-compose &> /dev/null; then
               echo "🐳 Docker Compose not found. Installing Docker Compose..."
-
-              # Install Docker Compose v2 (recommended)
-              # DOCKER_COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-              # sudo curl -L "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-              # sudo chmod +x /usr/local/bin/docker-compose
-
-              # Create symlink for docker compose (v2)
-              # sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
-
               apt install -y -qq docker-compose
 
               echo "✅ Docker Compose installed successfully"
@@ -127,6 +96,27 @@ jobs:
               docker-compose --version || docker compose version
             fi
 
+      - name: Setup Traffic API project directory on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            mkdir -p ${{ env.TRAFFIC_API_DIR }}/{data,static,logs}
+            chown -R ${{ secrets.VPS_USERNAME }}:${{ secrets.VPS_USERNAME }} ${{ env.TRAFFIC_API_DIR }}
+            chmod -R 755 ${{ env.TRAFFIC_API_DIR }}
+
+      - name: Copy project files to VPS
+        uses: appleboy/scp-action@v0.1.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "."
+          target: ${{ env.TRAFFIC_API_DIR }}/
+          # strip_components: 1
+
       - name: Create environment file on VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -134,6 +124,9 @@ jobs:
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
+            set -e
+            set -x
+
             cd ${{ env.TRAFFIC_API_DIR }}
             
             # Create .env file with proper escaping
@@ -146,9 +139,33 @@ jobs:
             ENDFILE
             
             echo "✅ Created/updated .env file"
+
             # Show first few chars for verification (without exposing secrets)
             echo "📄 .env file preview (first line):"
             head -n 1 .env | sed 's/./*/g'
+
+      - name: Create Python environment on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd ${{ env.TRAFFIC_API_DIR }}
+
+            # Create .venv
+            if ! command -v python3 --version &> /dev/null; then
+              echo "Python3 not found. Installing Python3 ..."
+              apt install -y -qq python3 python3-dev
+            
+            echo "Create .venv"
+            python3 -m venv .venv
+
+            echo "Active Python env"
+            source .venv/bin/activate
+            
+            echo "Install requirements"
+            python3 -m pip install -q -r requirements.txt --no-cache-dir --no-input
 
       - name: Deploy application
         uses: appleboy/ssh-action@v1.0.3
@@ -157,50 +174,37 @@ jobs:
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
+            cd ${{ env.TRAFFIC_API_DIR }}
 
-              cd ${{ env.TRAFFIC_API_DIR }}
+            echo "🔍 Checking available disk space..."
+            df -h .
+            
+            echo "🔄 Stopping existing containers..."
+            # Try both docker-compose and docker compose for compatibility
+            docker-compose down --remove-orphans 2>/dev/null || docker compose down --remove-orphans
 
-              echo "🔍 Checking available disk space..."
-              df -h .
+            echo "🏗️ Pulling latest base images..."
+            docker-compose pull --quiet 2>/dev/null || docker compose pull --quiet
+            
+            echo "🚀 Building and starting services..."
+            docker-compose up -d --build 2>/dev/null || docker compose up -d --build
 
-              echo "Ensure proper cleanup before deployment"
-              docker stop $(docker ps -q --filter "publish=8000") 2>/dev/null || true
-              sudo fuser -k 8000/tcp
-
-              # Ensure docker-compose config file exists
-              if [ ! -f "docker-compose.yml" ] && [ ! -f "docker-compose.yaml" ] && [ ! -f "compose.yml" ] && [ ! -f "compose.yaml" ]; then
-                echo "❌ No docker-compose configuration file found in $(pwd)!"
-                ls -l
-                exit 1
+            echo "⏳ Waiting for services to initialize..."
+            sleep 10
+            
+            # Wait for services to be ready with timeout
+            echo "🔍 Waiting for services to be healthy..."
+            for i in {1..6}; do
+              if docker-compose ps | grep -q "Up" || docker compose ps | grep -q "Up"; then
+                echo "✅ Services are starting up..."
+                break
               fi
-
-              echo "🔄 Stopping existing containers..."
-              # Try both docker-compose and docker compose for compatibility
-              docker-compose down --remove-orphans 2>/dev/null || docker compose down --remove-orphans
-
-              echo "🏗️ Pulling latest base images..."
-              docker-compose pull --quiet 2>/dev/null || docker compose pull --quiet
-
-              echo "🚀 Building and starting services..."
-              # Force recreate containers to ensure updated images and configuration are applied
-              docker-compose up -d --build --force-recreate 2>/dev/null || docker compose up -d --build --force-recreate
-
-              echo "⏳ Waiting for services to initialize..."
+              echo "⏳ Still waiting for services... ($i/6)"
               sleep 10
-
-              # Wait for services to be ready with timeout
-              echo "🔍 Waiting for services to be healthy..."
-              for i in {1..6}; do
-                if docker-compose ps | grep -q "Up" || docker compose ps | grep -q "Up"; then
-                  echo "✅ Services are starting up..."
-                  break
-                fi
-                echo "⏳ Still waiting for services... ($i/6)"
-                sleep 10
-              done
-
-              echo "📊 Final service status:"
-              docker-compose ps 2>/dev/null || docker compose ps
+            done
+            
+            echo "📊 Final service status:"
+            docker-compose ps 2>/dev/null || docker compose ps
 
       - name: Verify deployment
         uses: appleboy/ssh-action@v1.0.3
