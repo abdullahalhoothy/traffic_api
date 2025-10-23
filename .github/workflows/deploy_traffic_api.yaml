@@ -7,7 +7,7 @@ on:
 
 env:
   PROJECT_DIR: .
-  TRAFFIC_API_DIR: .
+  TRAFFIC_API_DIR: ./traffic_api
 
 jobs:
   deploy:
@@ -45,8 +45,8 @@ jobs:
               git clone https://${{ secrets.DEV_GITHUB_PAT }}@github.com/abdullahalhoothy/traffic_api.git
             cd traffic_api
 
-              echo "📁 Listing files in traffic_api directory after clone:"
-              ls -l
+            echo "📁 Listing files in traffic_api directory after clone:"
+            ls -l
 
             set -e
             echo "🛠️ Installing system dependencies..."
@@ -157,6 +157,7 @@ jobs:
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
+
               cd ${{ env.TRAFFIC_API_DIR }}
 
               echo "🔍 Checking available disk space..."
