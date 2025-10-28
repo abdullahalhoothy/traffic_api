@@ -16,8 +16,8 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-123456}
       - RATE_LIMIT=${RATE_LIMIT:-10/minute}
       - SELENIUM_PROXY=${SELENIUM_PROXY:-}
-      - JOBQUEUE_MAX_JOBS=20           # Explicitly match grid capacity
-      - JOBQUEUE_PER_JOB_CONCURRENCY=4 # Match node session capacity
+      - JOBQUEUE_MAX_JOBS=2
+      - JOBQUEUE_PER_JOB_CONCURRENCY=20
     volumes:
       - .:/app
       - ./static:/app/static
