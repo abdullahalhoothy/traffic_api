@@ -11,13 +11,14 @@ from enum import Enum
 from typing import Any, Callable, Dict, List
 from urllib.parse import urljoin
 
-from config import logger
 from tenacity import (
     retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
 )
+
+from config import logger
 
 
 class JobStatusEnum(Enum):
@@ -54,8 +55,8 @@ class JobQueue:
     def __init__(
         self,
         worker_callable: Callable[..., Dict[str, Any]],
-        max_workers: int = 20,
-        per_job_concurrency: int = 4,
+        max_workers: int = 2,
+        per_job_concurrency: int = 20,
     ):
         """
         Args:

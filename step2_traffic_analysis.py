@@ -340,7 +340,7 @@ class GoogleMapsTrafficAnalyzer:
                 else "no_day"
             )
             screenshot_filename = (
-                f"traffic_{lat}_{lng}_{safe_day_of_week}.png"
+                f"traffic_{lat}_{lng}_{safe_day_of_week}_{target_time}.png"
             )
             screenshot_path = os.path.join(screenshots_dir, screenshot_filename)
 
@@ -896,9 +896,13 @@ class GoogleMapsTrafficAnalyzer:
                     try:
                         time.sleep(1.0)  # Increased pause to ensure file is not locked
                         shutil.copy2(pinned_screenshot_path, static_pinned_path)
-                        image_id = os.path.splitext(static_filename)[0]  # Remove .png extension
+                        image_id = os.path.splitext(static_filename)[
+                            0
+                        ]  # Remove .png extension
                         static_screenshot_path = static_pinned_path
-                        logger.info(f"Pinned image saved to static: {static_pinned_path}")
+                        logger.info(
+                            f"Pinned image saved to static: {static_pinned_path}"
+                        )
                     except Exception as copy_error:
                         logger.warning(f"Could not copy to static folder: {copy_error}")
                         # Continue with local analysis but note the copy failure
@@ -926,44 +930,50 @@ class GoogleMapsTrafficAnalyzer:
             result = self.calculate_final_traffic_score(analysis)
 
             # Rename pinned image to include integer storefront and area scores
-            storefront_score_int = int(result.get("storefront_score", 0))
-            area_score_int = int(result.get("area_score", 0))
+            # storefront_score_int = int(result.get("storefront_score", 0))
+            # area_score_int = int(result.get("area_score", 0))
 
-            pinned_dir, pinned_base = os.path.split(pinned_screenshot_path)
-            pinned_name, pinned_ext = os.path.splitext(pinned_base)
+            # pinned_dir, pinned_base = os.path.split(pinned_screenshot_path)
+            # pinned_name, pinned_ext = os.path.splitext(pinned_base)
 
             # if live_traffic true, change target time in pinned name to "live"
-            if live_traffic:
-                target_time_string = target_time.replace(":", "-")
-                pinned_name = pinned_name.replace(
-                    f"_{target_time_string}", "_live"
-                ).replace("no_time", "live")
+            # if live_traffic:
+            #     target_time_string = target_time.replace(":", "-")
+            #     pinned_name = pinned_name.replace(
+            #         f"_{target_time_string}", "_live"
+            #     ).replace("no_time", "live")
 
-            new_pinned_name = f"{pinned_name}_frontscore={storefront_score_int}_areascore={area_score_int}{pinned_ext}"
-            new_pinned_path = os.path.join(pinned_dir, new_pinned_name)
+            # new_pinned_name = f"{pinned_name}_frontscore={storefront_score_int}_areascore={area_score_int}{pinned_ext}"
+            # new_pinned_name = f"{pinned_name}_frontscore={storefront_score_int}_areascore={area_score_int}{pinned_ext}"
+            # new_pinned_path = os.path.join(pinned_dir, new_pinned_name)
 
-            os.replace(pinned_screenshot_path, new_pinned_path)
-            logger.info(
-                f"Renamed pinned image to include storefront and area scores: {new_pinned_path}"
-            )
-            pinned_screenshot_path = new_pinned_path
-
+            # os.replace(pinned_screenshot_path, new_pinned_path)
+            # logger.info(
+            #     f"Renamed pinned image to include storefront and area scores: {new_pinned_path}"
+            # )
+            # pinned_screenshot_path = new_pinned_path
 
             # If we saved a static copy earlier, try to rename it to match the new pinned filename
             if static_screenshot_path and os.path.exists(static_screenshot_path):
                 static_dirname = os.path.dirname(static_screenshot_path)
-                new_static_path = os.path.join(static_dirname, os.path.basename(pinned_screenshot_path))
+                new_static_path = os.path.join(
+                    static_dirname, os.path.basename(pinned_screenshot_path)
+                )
                 # If new_static_path already exists, avoid overwrite; else rename
                 if not os.path.exists(new_static_path):
                     os.replace(static_screenshot_path, new_static_path)
                     static_screenshot_path = new_static_path
-                    logger.info(f"Renamed static screenshot to match pinned scores: {new_static_path}")
+                    logger.info(
+                        f"Renamed static screenshot to match pinned scores: {new_static_path}"
+                    )
                 else:
                     # If a file with the target name already exists, remove the old static and copy the new one
                     os.remove(static_screenshot_path)
                     shutil.copy2(pinned_screenshot_path, new_static_path)
                     static_screenshot_path = new_static_path
-                    logger.info(f"Replaced static screenshot with scored pinned image: {new_static_path}")
+                    logger.info(
+                        f"Replaced static screenshot with scored pinned image: {new_static_path}"
+                    )
 
             # Add metadata
             result.update(
