@@ -16,7 +16,7 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-123456}
       - RATE_LIMIT=${RATE_LIMIT:-10/minute}
       - SELENIUM_PROXY=${SELENIUM_PROXY:-}
-      - JOBQUEUE_MAX_JOBS=1
+      - JOBQUEUE_MAX_JOBS=2
       - JOBQUEUE_PER_JOB_CONCURRENCY=20
     volumes:
       - .:/app
@@ -33,7 +33,7 @@ services:
       - GRID_BROWSER_TIMEOUT=20       # (60) Clean stuck sessions
       - GRID_SESSION_TIMEOUT=90       # Max session duration
       - GRID_TIMEOUT=30
-      - GRID_JETTY_MAX_THREADS=50
+      - GRID_JETTY_MAX_THREADS=100
   chrome:
     image: selenium/node-chrome:124.0
     # container_name: selenium_node_chrome
