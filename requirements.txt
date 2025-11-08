@@ -19,3 +19,5 @@ requests
 httpx
 sqlalchemy[asyncio]
 aiosqlite
+websockets
+async-timeout
