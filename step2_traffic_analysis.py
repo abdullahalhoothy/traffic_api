@@ -94,7 +94,6 @@ def setup_webdriver(
     chrome_options.add_argument("--disable-extensions")
     chrome_options.add_argument("--disable-infobars")
     chrome_options.add_argument("--disable-browser-side-navigation")
-
     chrome_options.add_argument("--aggressive-cache-discard")
     chrome_options.add_argument("--disable-application-cache")
     chrome_options.add_argument("--media-cache-size=1")
@@ -102,6 +101,7 @@ def setup_webdriver(
     chrome_options.add_argument("--disable-images")  # Critical for speed
     chrome_options.add_argument("--disable-javascript")  # Maximum speed
     chrome_options.add_argument("--disable-plugins")
+    chrome_options.add_argument("--blink-settings=imagesEnabled=false")
     chrome_options.add_argument("--disable-background-timer-throttling")
     chrome_options.add_argument("--disable-renderer-backgrounding")
     chrome_options.add_argument("--disable-backgrounding-occluded-windows")
@@ -196,27 +196,7 @@ def _select_typical_mode(driver):
     typical_traffic_button.click()
     time.sleep(1)
 
-    # xpath = '//*[@id="action-menu"]/div/div[2]'
-    # condition = EC.any_of(
-    #     EC.element_to_be_clickable(
-    #         (
-    #             By.XPATH,
-    #             xpath,
-    #         )
-    #     ),
-    #     EC.visibility_of_element_located(
-    #         (
-    #             By.XPATH,
-    #             xpath,
-    #         )
-    #     ),
-    # )
-    # typical_traffic_button = WebDriverWait(driver, 5).until(condition)
-    # typical_traffic_button.click()
-    # time.sleep(1)
-
     logger.info("Typical traffic mode selected")
-
     return True
 
 
@@ -312,8 +292,6 @@ def capture_google_maps_screenshot(
         except Exception:
             logger.info("No cookie banner found")
 
-        # time.sleep(3)
-
         # Cleaning up unimportant elements
         try:
             elements_to_remove = (
@@ -366,9 +344,6 @@ def capture_google_maps_screenshot(
         # Select traffic type (typical or live) if possible
         if day_of_week is not None or target_time is not None:
             try:
-                # typical_success = retry_exception(
-                #     lambda: _select_typical_mode(driver), "Typical mode selection", 2
-                # )
                 if _select_typical_mode(driver):
                     # Choose a day for typical traffic if specified
                     if day_of_week is not None:
@@ -402,19 +377,6 @@ def capture_google_maps_screenshot(
         screenshot_path = os.path.join(screenshots_dir, screenshot_filename)
 
         # Take screenshot with retry logic
-        # screenshot_success = False
-        # for attempt in range(3):  # Try up to 3 times
-        #     try:
-        #         driver.save_screenshot(screenshot_path)
-        #         screenshot_success = True
-        #         break
-        #     except Exception as screenshot_error:
-        #         logger.warning(
-        #             f"Screenshot attempt {attempt + 1} failed: {screenshot_error}"
-        #         )
-        #         if attempt < 2:  # Don't sleep on the last attempt
-        #             time.sleep(1)
-
         screenshot_success = retry_exception(
             lambda: driver.save_screenshot(screenshot_path), "Screenshot"
         )
