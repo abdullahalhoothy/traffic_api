@@ -11,20 +11,13 @@ class Token(BaseModel):
     token_type: str
 
 
-class TrafficRequest(BaseModel):
-    lat: float
-    lng: float
-    storefront_direction: str = "north"
-    day: Optional[str] = None
-    time: Optional[str] = None
-    # save_to_static: bool = True
-
-
 class TrafficResponse(BaseModel):
-    score: float
-    method: str
-    screenshot_url: Optional[str] = None
-    details: Dict[str, Any] = {}
+    job_id: str
+    status: str
+    completed: int
+    locations_count: int
+    result: Dict[str, Any]  # {"count": int, "locations": List[Dict[str, Any]]}
+    error: Optional[str] = None
 
 
 class LocationItem(BaseModel):
@@ -33,7 +26,6 @@ class LocationItem(BaseModel):
     storefront_direction: Optional[str] = "north"
     day: Optional[str] = None
     time: Optional[str] = None
-    # save_to_static: Optional[bool] = False
 
 
 class MultiTrafficRequest(BaseModel):

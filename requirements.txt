@@ -16,3 +16,6 @@ alembic
 python-dotenv
 python-multipart
 requests
+httpx
+sqlalchemy[asyncio]
+aiosqlite

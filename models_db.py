@@ -1,12 +1,11 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
+from db import Base
+from jobs import JobStatusEnum
 from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-
-from db import Base
-from jobs import JobStatusEnum
 
 
 class User(Base):
@@ -44,7 +43,7 @@ class Job(Base):
 
     uuid = Column(String, unique=True, index=True, nullable=False)
     status = Column(String, nullable=False)
-    remaining = Column(Integer, nullable=False, server_default="0")
+    # completed = Column(Integer, nullable=False, server_default="0")
     error = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

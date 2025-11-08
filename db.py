@@ -1,20 +1,22 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
-
 from config import DB_URL
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import declarative_base
 
-# Important for SQLite multithreaded usage with FastAPI
-engine = create_engine(DB_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+# Convert to async SQLite URL
+async_db_url = DB_URL.replace("sqlite:///", "sqlite+aiosqlite:///")
+engine = create_async_engine(async_db_url, echo=False, future=True)
+AsyncSessionLocal = async_sessionmaker(
+    bind=engine, class_=AsyncSession, expire_on_commit=False
+)
 Base = declarative_base()
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
