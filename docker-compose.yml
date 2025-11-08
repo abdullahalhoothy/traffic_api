@@ -16,7 +16,7 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-123456}
       - RATE_LIMIT=${RATE_LIMIT:-10/minute}
       - SELENIUM_PROXY=${SELENIUM_PROXY:-}
-      - JOBQUEUE_MAX_JOBS=2
+      - JOBQUEUE_MAX_JOBS=1
       - JOBQUEUE_PER_JOB_CONCURRENCY=20
     volumes:
       - .:/app
@@ -30,9 +30,10 @@ services:
       - "4444:4444"
     environment:
       - GRID_MAX_SESSION=20           # Maximum concurrent sessions the hub can handle
-      - GRID_BROWSER_TIMEOUT=60       # Clean stuck sessions
-      - GRID_SESSION_TIMEOUT=300      # Max session duration
-
+      - GRID_BROWSER_TIMEOUT=20       # (60) Clean stuck sessions
+      - GRID_SESSION_TIMEOUT=90       # Max session duration
+      - GRID_TIMEOUT=30
+      - GRID_JETTY_MAX_THREADS=50
   chrome:
     image: selenium/node-chrome:124.0
     # container_name: selenium_node_chrome
@@ -44,6 +45,9 @@ services:
       - SE_EVENT_BUS_SUBSCRIBE_PORT=4443
       - SE_NODE_MAX_SESSIONS=4        # 4 sessions per node
       - SE_VNC_ENABLED=false
+      - SE_NO_VIRTUAL_PORT=1
+      - SE_SESSION_RETRY_INTERVAL=2
+      - SE_SESSION_REQUEST_TIMEOUT=30
     shm_size: 1gb
     deploy:
       replicas: 5                     # 5 nodes × 4 sessions = 20 concurrent

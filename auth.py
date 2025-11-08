@@ -4,15 +4,15 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
+from config import ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM, SECRET_KEY
+from db import get_db
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from sqlalchemy.orm import Session
-from sqlalchemy.util import md5_hex
-
-from config import ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM, SECRET_KEY
-from db import get_db
 from models_db import User
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.util import md5_hex
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -21,12 +21,15 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return md5_hex(plain_password) == hashed_password
 
 
-def authenticate_user(username: str, password: str, db: Session) -> Optional[User]:
-    user = db.query(User).filter(User.username == username).first()
+async def authenticate_user(
+    username: str, password: str, db: AsyncSession
+) -> Optional[User]:
+    result = await db.execute(select(User).filter(User.username == username))
+    user = result.scalar_one_or_none()
     if not user:
-        return
+        return None
     if not verify_password(password, user.hashed_password):
-        return
+        return None
     return user
 
 
@@ -40,7 +43,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+    token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)
 ):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -50,7 +53,8 @@ async def get_current_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid authentication",
             )
-        user = db.query(User).filter(User.username == username).first()
+        result = await db.execute(select(User).filter(User.username == username))
+        user = result.scalar_one_or_none()
         if user is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

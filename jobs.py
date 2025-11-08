@@ -1,22 +1,13 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
-import os
-import queue
-import string
-import threading
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from enum import Enum
-from typing import Any, Callable, Dict, List
-from urllib.parse import urljoin
 
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
+import asyncio
+import os
+import time
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urljoin
 
 from config import logger
 
@@ -29,23 +20,7 @@ class JobStatusEnum(Enum):
     DONE = "done"
 
 
-class JobID:
-    @staticmethod
-    def choice(seq):
-        """Return a secure random element from a non-empty sequence."""
-        if not seq:
-            raise IndexError("Cannot choose from an empty sequence")
-        # generate random index securely
-        idx = int.from_bytes(os.urandom(4), "big") % len(seq)
-        return seq[idx]
-
-    @staticmethod
-    def random_string(length=12, alphabet=string.ascii_letters + string.digits):
-        """Generate a secure random string from given alphabet."""
-        return "".join(JobID.choice(alphabet) for _ in range(length))
-
-
-class JobQueue:
+class AsyncJobQueue:
     """
     Queue that accepts jobs (each job can contain multiple locations).
     A job is processed by a worker thread which executes analyses for each
@@ -69,47 +44,57 @@ class JobQueue:
         self.max_workers = max_workers
         self.per_job_concurrency = per_job_concurrency
 
-        self._queue = queue.Queue()
         self._jobs: Dict[str, Dict] = {}
-        self._start_workers()
+        self._queue: asyncio.Queue = asyncio.Queue()
+        self._running = True
+        self._workers: List[asyncio.Task] = []
 
-    def _start_workers(self):
-        for _ in range(self.max_workers):
-            t = threading.Thread(target=self._worker_loop, daemon=True)
-            t.start()
+    async def start(self):
+        """Start the job queue workers"""
+        for i in range(self.max_workers):
+            worker = asyncio.create_task(self._worker_loop(), name=f"job-worker-{i}")
+            self._workers.append(worker)
+        logger.info(f"Started {self.max_workers} job workers")
 
-    def submit(self, payload: dict) -> str:
+    async def stop(self):
+        """Stop all job workers"""
+        self._running = False
+        for worker in self._workers:
+            worker.cancel()
+        await asyncio.gather(*self._workers, return_exceptions=True)
+        self._workers.clear()
+
+    async def submit(self, payload: dict) -> str:
         """
         Submit a job payload. payload should include:
           - 'locations': list of location dicts (each with lat, lng, storefront_direction, day, time)
           - other optional: proxy, user info...
         Returns: job_id
         """
-        # job_id = str(uuid.uuid4())
-        job_id = JobID.random_string()
+        job_id = os.urandom(8).hex()
         job_record = {
             "status": JobStatusEnum.PENDING,
             "payload": payload,
-            "result": {"count": 0, "results": []},
+            "result": {"count": 0, "locations": []},
             "error": None,
-            "remaining": 0,
+            "completed": 0,
             "failure": 0,
             "created_at": time.time(),
             "updated_at": time.time(),
             "cancel_requested": False,
+            "_logged_to_db": False,
         }
         self._jobs[job_id] = job_record
-        self._queue.put(job_id)
+        await self._queue.put(job_id)
         return job_id
 
-    def get(self, job_id: str) -> dict:
+    async def get(self, job_id: str) -> Optional[dict]:
+        """Get job by ID"""
         return self._jobs.get(job_id)
 
-    def remove(self, job_id: str) -> None:
-        try:
-            self._jobs.pop(job_id)
-        except Exception:
-            pass
+    async def remove(self, job_id: str) -> None:
+        """Remove job from tracking"""
+        self._jobs.pop(job_id, None)
 
     def cancel(self, job_id: str) -> dict | None:
         job = self._jobs.get(job_id)
@@ -128,57 +113,67 @@ class JobQueue:
         job["updated_at"] = time.time()
         return job
 
-    def _worker_loop(self):
-        while True:
-            job_id = self._queue.get()
-            job = self._jobs.get(job_id)
-
-            if not job:
+    async def _worker_loop(self):
+        """Worker loop to process jobs"""
+        while self._running:
+            try:
+                job_id = await asyncio.wait_for(self._queue.get(), timeout=1.0)
+                await self._process_job(job_id)
                 self._queue.task_done()
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:
+                logger.error(f"Worker loop error: {e}")
                 continue
 
-            job["status"] = JobStatusEnum.RUNNING
-            job["updated_at"] = time.time()
+    async def _process_job(self, job_id: str):
+        """Process a single job"""
+        job = self._jobs.get(job_id)
+        if not job:
+            return
 
-            locations = job["payload"].get("locations", [])[:20]  # enforce limit
-            results: List[Any] = [None] * len(locations)
+        job["status"] = JobStatusEnum.RUNNING
+        job["updated_at"] = time.time()
 
-            job["remaining"] = len(locations)
+        locations = job["payload"].get("locations", [])[:20]
+        results: List[Any] = [None] * len(locations)
 
-            try:
-                # process locations in parallel but limited concurrency per job
-                with ThreadPoolExecutor(
-                    max_workers=max(1, self.per_job_concurrency)
-                ) as ex:
-                    future_to_index = {}
-                    for idx, loc in enumerate(locations):
-                        if job.get("cancel_requested"):
-                            break
+        try:
+            # Process locations concurrently with limited concurrency
+            semaphore = asyncio.Semaphore(self.per_job_concurrency)
 
-                        future = ex.submit(
-                            self._run_single_location, loc, job["payload"].get("proxy")
+            async def process_location(idx: int, loc: dict):
+                if job.get("cancel_requested"):
+                    return None
+
+                async with semaphore:
+                    try:
+                        return await self._run_single_location(
+                            loc, job["payload"].get("proxy")
                         )
-                        future_to_index[future] = idx
+                    except Exception as e:
+                        job["failure"] += 1
+                        error_msg = f"Location analysis failed: {str(e)}"
+                        logger.error(f"Failed location {idx}: {error_msg}")
+                        return {"error": error_msg}
 
-                    # collect results as they complete, keep order via index
-                    for future in as_completed(future_to_index):
-                        if job.get("cancel_requested"):
-                            break
+            # Create tasks for all locations
+            tasks = []
+            for idx, loc in enumerate(locations):
+                if job.get("cancel_requested"):
+                    break
+                task = asyncio.create_task(process_location(idx, loc))
+                tasks.append((idx, task))
 
-                        idx = future_to_index[future]
-                        try:
-                            res = future.result()
-                            if res and "error" in res:
-                                raise ValueError("There is no analysis data")
-                        except Exception as e:
-                            job["failure"] += 1
+            # Collect results as they complete
+            for idx, task in tasks:
+                if job.get("cancel_requested"):
+                    break
 
-                            error_msg = f"Location analysis failed: {str(e)}"
-                            res = {"error": error_msg}
-                            logger.error(
-                                f"Failed to analyze location at index {idx}: {error_msg}"
-                            )
-
+                try:
+                    res = await task
+                    if res:
+                        # Handle screenshot URL generation
                         screenshot_path = res.get("screenshot_path") or res.get(
                             "pinned_screenshot_path"
                         )
@@ -194,63 +189,50 @@ class JobQueue:
                                     f"static/{rel.replace(os.sep, '/')}",
                                 )
                             except Exception as e:
-                                error_msg = f"Fetching Screenshot failed: {str(e)}"
                                 logger.warning(
-                                    f"Failed to fetch location screenshot {idx}: {error_msg}"
+                                    f"Failed to generate screenshot URL: {e}"
                                 )
 
                         res["screenshot_url"] = screenshot_url
                         results[idx] = res
 
-                        job["remaining"] -= 1
+                except Exception as e:
+                    logger.error(f"Task processing failed: {e}")
+                finally:
+                    job["completed"] += 1
 
-                if not job.get("cancel_requested"):
-                    job["result"].update({"count": len(locations), "results": results})
+            if not job.get("cancel_requested"):
+                job["result"]["locations"] = [
+                    r for r in results if r and "error" not in r
+                ]
+                job["result"]["count"] = len(job["result"]["locations"])
+
+                # Check if all locations failed
+                if len(locations) > 0 and job.get("failure", 0) == len(locations):
+                    error_messages = [
+                        r.get("error", "Unknown error")
+                        for r in results
+                        if r and "error" in r
+                    ]
+                    job["error"] = (
+                        f"All {len(locations)} location(s) failed. Errors: {'; '.join(error_messages[:3])}"
+                    )
+                    job["status"] = JobStatusEnum.FAILED
+                else:
                     job["status"] = JobStatusEnum.DONE
 
-                    # Check if all locations failed
-                    if len(locations) > 0 and job.get("failure", 0) == len(locations):
-                        # All locations failed - mark job as FAILED
-                        error_messages = [
-                            r.get("error", "Unknown error")
-                            for r in results
-                            if r and "error" in r
-                        ]
-                        job["error"] = (
-                            f"All {len(locations)} location(s) failed. Errors: {'; '.join(error_messages[:3])}"  # Limit to first 3 errors
-                        )
-                        job["status"] = JobStatusEnum.FAILED
-                    else:
-                        job["status"] = JobStatusEnum.DONE
+        except Exception as e:
+            error_msg = f"Job processing failed: {str(e)}"
+            job["error"] = error_msg
+            job["status"] = JobStatusEnum.FAILED
+            logger.error(f"Job {job_id} failed: {e}")
 
-            except Exception as e:
-                error_msg = f"The job failed: {str(e)}"
-                job["error"] = error_msg
-                job["status"] = JobStatusEnum.FAILED
-                logger.warning(f"Failed to complete The Job {idx}: {str(e)}")
+        finally:
+            job["updated_at"] = time.time()
 
-            finally:
-                job["updated_at"] = time.time()
-                self._queue.task_done()
-
-    # Optional retry wrapper for the worker callable (exposed small retries for robustness)
-    @retry(
-        wait=wait_exponential(multiplier=1, min=1, max=8),
-        stop=stop_after_attempt(2),
-        retry=retry_if_exception_type(Exception),
-    )
-    def _call_worker(self, *args, **kwargs):
-        return self.worker_callable(*args, **kwargs)
-
-    def _run_single_location(self, loc: dict, proxy: str | None):
-        """
-        Execute the provided worker callable for a single location dict.
-        location dict expected keys:
-          lat, lng, storefront_direction, day, time
-        """
-
-        # call the worker callable (this may raise)
-        return self._call_worker(
+    async def _run_single_location(self, loc: dict, proxy: Optional[str] = None):
+        """Execute worker for a single location"""
+        return await self.worker_callable(
             loc.get("lat"),
             loc.get("lng"),
             loc.get("storefront_direction", "north"),
@@ -258,3 +240,7 @@ class JobQueue:
             loc.get("time"),
             proxy,
         )
+
+
+# For backward compatibility
+JobQueue = AsyncJobQueue
