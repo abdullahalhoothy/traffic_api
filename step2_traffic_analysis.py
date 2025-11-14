@@ -98,15 +98,14 @@ def setup_webdriver(
     chrome_options.add_argument("--disable-application-cache")
     chrome_options.add_argument("--media-cache-size=1")
     chrome_options.add_argument("--disk-cache-size=1")
-    chrome_options.add_argument("--disable-images")  # Critical for speed
-    chrome_options.add_argument("--disable-javascript")  # Maximum speed
     chrome_options.add_argument("--disable-plugins")
-    chrome_options.add_argument("--blink-settings=imagesEnabled=false")
-    chrome_options.add_argument("--disable-background-timer-throttling")
-    chrome_options.add_argument("--disable-renderer-backgrounding")
-    chrome_options.add_argument("--disable-backgrounding-occluded-windows")
-
-    chrome_options.add_argument("--memory-pressure-off")
+    # chrome_options.add_argument("--disable-images")  # Critical for speed
+    # chrome_options.add_argument("--disable-javascript")  # Maximum speed
+    # chrome_options.add_argument("--blink-settings=imagesEnabled=false")
+    # chrome_options.add_argument("--disable-background-timer-throttling")
+    # chrome_options.add_argument("--disable-renderer-backgrounding")
+    # chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+    # chrome_options.add_argument("--memory-pressure-off")
 
     selenium_url = selenium_url or os.getenv(
         "SELENIUM_URL", "http://selenium-hub:4444/wd/hub"
@@ -189,7 +188,8 @@ def _select_typical_mode(driver):
         EC.element_to_be_clickable(
             (
                 By.XPATH,
-                '//*[@id="action-menu"]/div/div[2]',
+                # '//*[@id="action-menu"]/div/div[2]',
+                '//*[@id="fDahXd"]/div[1]/div/div[2]'
             )
         )
     )
@@ -292,36 +292,6 @@ def capture_google_maps_screenshot(
         except Exception:
             logger.info("No cookie banner found")
 
-        # Cleaning up unimportant elements
-        try:
-            elements_to_remove = (
-                (By.ID, "assistive-chips"),
-                (By.ID, "omnibox-container"),
-                (By.ID, "vasquette"),
-                (By.XPATH, "/html/body/div[1]/div[3]/div[9]/div[7]/div/div"),
-            )
-
-            for by, value in elements_to_remove:
-                try:
-                    element = WebDriverWait(driver, 5).until(
-                        EC.presence_of_element_located(
-                            (
-                                by,
-                                value,
-                            )
-                        )
-                    )
-                    driver.execute_script("arguments[0].remove();", element)
-                except Exception:
-                    pass
-
-            logger.info("Successfully Cleaning up unimportant elements")
-            time.sleep(1)
-        except Exception as cleanup_error:
-            logger.warning(
-                f"Failed to cleaning up unimportant elements: {cleanup_error}"
-            )
-
         # Zoom operations to trigger data refresh
         try:
             driver.execute_script(
@@ -357,6 +327,36 @@ def capture_google_maps_screenshot(
             except Exception as traffic_error:
                 logger.info(f"Using live traffic mode: {traffic_error}")
                 live_traffic = True
+
+        # Cleaning up unimportant elements
+        try:
+            elements_to_remove = (
+                (By.ID, "assistive-chips"),
+                (By.ID, "omnibox-container"),
+                (By.ID, "vasquette"),
+                (By.XPATH, "/html/body/div[1]/div[3]/div[9]/div[7]/div/div"),
+            )
+
+            for by, value in elements_to_remove:
+                try:
+                    # element = WebDriverWait(driver, 5).until(
+                    #     EC.presence_of_element_located(
+                    #         (
+                    #             by,
+                    #             value,
+                    #         )
+                    #     )
+                    # )
+                    driver.execute_script("arguments[0].remove();", driver.find_element(by, value))
+                except Exception:
+                    pass
+
+            logger.info("Successfully Cleaning up unimportant elements")
+            time.sleep(1)
+        except Exception as cleanup_error:
+            logger.warning(
+                f"Failed to cleaning up unimportant elements: {cleanup_error}"
+            )
 
         # Generate screenshot path
         # Save screenshots in local traffic_screenshots folder
